@@ -1,0 +1,691 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>License Audit Game (PBE) — HiGHS WASM</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    :root{
+      --bg:#050711; --panel:#0b1020; --card:#101629;
+      --accent:#38bdf8; --danger:#f97373; --ok:#4ade80;
+      --text:#e5e7eb; --muted:#9ca3af; --border:#1f2937;
+      --font:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{
+      font-family:var(--font);
+      background: radial-gradient(circle at top, #0b1120 0, #020617 45%, #000 85%);
+      color:var(--text); min-height:100vh;
+    }
+    .app{max-width:1200px;margin:0 auto;padding:1.25rem 1.5rem 2.5rem}
+    header{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:1rem}
+    h1{font-size:1.35rem;font-weight:700;letter-spacing:.02em}
+    .sub{margin-top:.35rem;color:var(--muted);font-size:.9rem;max-width:52rem;line-height:1.35}
+    .badge{border:1px solid var(--border);background:rgba(17,24,39,.8);color:var(--muted);
+      padding:.35rem .75rem;border-radius:999px;font-size:.8rem;display:inline-flex;align-items:center;gap:.4rem}
+    .grid{display:grid;grid-template-columns: minmax(0,1.05fr) minmax(0,.95fr); gap:1rem; align-items:start}
+    .panel{
+      background: linear-gradient(145deg, rgba(15,23,42,0.98), rgba(15,23,42,0.96));
+      border:1px solid var(--border); border-radius:1rem; padding:1rem 1.1rem;
+      box-shadow:0 16px 40px rgba(0,0,0,.45);
+    }
+    .panel h2{font-size:.9rem;text-transform:uppercase;letter-spacing:.16em;color:var(--muted);margin-bottom:.65rem}
+    .row{display:flex;gap:.7rem;flex-wrap:wrap}
+    .card{
+      background:
+        radial-gradient(circle at top left, rgba(56,189,248,0.08) 0, transparent 55%),
+        radial-gradient(circle at bottom right, rgba(59,130,246,0.09) 0, transparent 55%),
+        var(--card);
+      border:1px solid rgba(17,24,39,.9);
+      border-radius:.9rem; padding:.75rem .85rem;
+    }
+    .card h3{font-size:.95rem;margin-bottom:.35rem}
+    .muted{color:var(--muted);font-size:.82rem;line-height:1.35}
+    label{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin-top:.55rem;font-size:.85rem}
+    input[type="range"]{width:220px}
+    .value{min-width:4.2rem;text-align:right;font-variant-numeric:tabular-nums}
+    .btnbar{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.75rem}
+    button{
+      background:rgba(56,189,248,.16); border:1px solid rgba(56,189,248,.45);
+      color:var(--text); padding:.45rem .75rem; border-radius:.75rem; cursor:pointer;
+      font-weight:600; font-size:.85rem;
+    }
+    button.secondary{
+      background:rgba(148,163,184,.12); border-color:rgba(148,163,184,.35);
+      color:var(--muted);
+    }
+    table{width:100%;border-collapse:collapse;margin-top:.6rem;font-size:.82rem}
+    th,td{border-bottom:1px solid var(--border);padding:.42rem .35rem;text-align:left;vertical-align:top}
+    thead{background:rgba(15,23,42,.95)}
+    th{color:var(--muted);font-weight:500}
+    .pill{display:inline-flex;align-items:center;padding:.08rem .45rem;border-radius:999px;
+      border:1px solid rgba(148,163,184,.55); color:var(--muted); font-size:.72rem}
+    .pill.ok{border-color:rgba(74,222,128,.55); color:#bbf7d0; background:rgba(22,163,74,.12)}
+    .pill.bad{border-color:rgba(248,113,113,.6); color:#fecaca; background:rgba(127,29,29,.15)}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace}
+    .note{margin-top:.75rem;padding:.6rem .7rem;border-radius:.75rem;border:1px dashed var(--border);background:rgba(15,23,42,.7);color:var(--muted);font-size:.82rem;line-height:1.35}
+    .spinner{width:14px;height:14px;border-radius:999px;border:2px solid rgba(148,163,184,.5);border-top-color:var(--accent);
+      animation:spin .7s linear infinite;display:inline-block}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr} input[type="range"]{width:180px} }
+  </style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <h1>🧾 Software License Audit as a Sequential Bayesian Game <span style="opacity:.6;font-size:.8rem">(PBE search + HiGHS WASM)</span></h1>
+      <div class="sub">
+        Small signaling + bargaining game. Customer has 4 private types (gap × evidence). Customer sends a posture signal (Cooperate / Guard / Fight).
+        Vendor then chooses a demand (offer) to maximize expected payoff. Customer accepts/rejects based on its type.
+        We search for <span class="mono">pure</span> customer signaling equilibria and compute the vendor best-response using HiGHS.
+      </div>
+    </div>
+    <div class="badge"><span>♟️</span><span>PBE (with simple off-path beliefs)</span></div>
+  </header>
+
+  <main class="grid">
+    <section class="panel">
+      <h2>Model parameters</h2>
+
+      <div class="row">
+        <div class="card" style="flex:1;min-width:320px">
+          <h3>Types & prior</h3>
+          <div class="muted">
+            Types are (Gap: Low/High) × (Evidence: Weak/Strong). Prior is separable:
+            <span class="mono">P(HighGap)=pG</span>, <span class="mono">P(StrongEvidence)=pQ</span>.
+          </div>
+
+          <label>
+            <span>pG = P(High gap)</span>
+            <input id="pG" type="range" min="0.05" max="0.95" step="0.05" value="0.35">
+            <span class="value" id="pGv">0.35</span>
+          </label>
+          <label>
+            <span>pQ = P(Strong evidence)</span>
+            <input id="pQ" type="range" min="0.05" max="0.95" step="0.05" value="0.55">
+            <span class="value" id="pQv">0.55</span>
+          </label>
+
+          <div class="note">
+            <span class="mono">High gap</span> means big latent exposure (e.g., many unlicensed seats). <span class="mono">Strong evidence</span> means the vendor can prove more (telemetry, records).
+          </div>
+        </div>
+
+        <div class="card" style="flex:1;min-width:320px">
+          <h3>Economics</h3>
+          <div class="muted">All amounts are in "k$" units (thousands). Keep it small and toy-like.</div>
+
+          <label>
+            <span>Base penalty (if proven): Low gap</span>
+            <input id="F_L" type="range" min="20" max="200" step="10" value="60">
+            <span class="value mono" id="F_Lv">60</span>
+          </label>
+
+          <label>
+            <span>Base penalty (if proven): High gap</span>
+            <input id="F_H" type="range" min="50" max="400" step="10" value="220">
+            <span class="value mono" id="F_Hv">220</span>
+          </label>
+
+          <label>
+            <span>Vendor legal cost if escalated</span>
+            <input id="L_V" type="range" min="0" max="120" step="5" value="40">
+            <span class="value mono" id="L_Vv">40</span>
+          </label>
+
+          <label>
+            <span>Customer escalation pain (switching/ops)</span>
+            <input id="L_C" type="range" min="0" max="200" step="10" value="90">
+            <span class="value mono" id="L_Cv">90</span>
+          </label>
+
+          <label>
+            <span>Audit execution cost (vendor)</span>
+            <input id="K_V" type="range" min="0" max="80" step="5" value="20">
+            <span class="value mono" id="K_Vv">20</span>
+          </label>
+
+          <label>
+            <span>Disruption cost (customer)</span>
+            <input id="K_C" type="range" min="0" max="80" step="5" value="15">
+            <span class="value mono" id="K_Cv">15</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="row" style="margin-top:.8rem">
+        <div class="card" style="flex:1;min-width:320px">
+          <h3>Signals (posture)</h3>
+          <div class="muted">
+            Posture changes two things: (1) how provable the gap is (detection multiplier), and (2) friction costs.
+          </div>
+
+          <table>
+            <thead><tr><th>Message</th><th>Detection ×</th><th>Vendor friction</th><th>Customer posture cost</th></tr></thead>
+            <tbody>
+              <tr><td><span class="pill ok">K</span> Cooperate</td><td class="mono" id="dK">1.00</td><td class="mono" id="hVK">5</td><td class="mono" id="hCK">5</td></tr>
+              <tr><td><span class="pill">G</span> Guard</td><td class="mono" id="dG">0.75</td><td class="mono" id="hVG">12</td><td class="mono" id="hCG">10</td></tr>
+              <tr><td><span class="pill bad">F</span> Fight</td><td class="mono" id="dF">0.45</td><td class="mono" id="hVF">25</td><td class="mono" id="hCF">18</td></tr>
+            </tbody>
+          </table>
+
+          <div class="note">
+            In a real audit you would make these type-dependent (e.g., "fight" cheaper for tough customers). Here we keep it small.
+          </div>
+        </div>
+
+        <div class="card" style="flex:1;min-width:320px">
+          <h3>Vendor offers</h3>
+          <div class="muted">Vendor chooses a demand after observing the message.</div>
+          <div class="row" style="margin-top:.4rem; gap:.45rem">
+            <span class="pill mono" id="offer0">x=50</span>
+            <span class="pill mono" id="offer1">x=100</span>
+            <span class="pill mono" id="offer2">x=150</span>
+            <span class="pill mono" id="offer3">x=200</span>
+          </div>
+          <div class="note">
+            Offer acceptance is type-by-type: accept if paying <span class="mono">x</span> is better than escalation.
+            (So acceptance is a best response — no extra decision variables needed.)
+          </div>
+
+          <div class="btnbar">
+            <button id="runBtn">Run PBE search</button>
+            <button class="secondary" id="resetBtn">Reset defaults</button>
+          </div>
+
+          <div class="note" id="solverNote">
+            <span class="spinner" id="spin"></span>
+            <span style="margin-left:.45rem">Loading HiGHS…</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Results</h2>
+
+      <div class="card">
+        <h3>Equilibria found</h3>
+        <div class="muted" id="summary">
+          Click "Run PBE search" to compute equilibria.
+        </div>
+
+        <table id="eqTable">
+          <thead>
+            <tr>
+              <th>Customer signaling strategy (pure)</th>
+              <th>Vendor best response (offer by message)</th>
+              <th>On-path posteriors μ(type | message)</th>
+              <th>Valid?</th>
+            </tr>
+          </thead>
+          <tbody id="eqBody"></tbody>
+        </table>
+
+        <div class="note">
+          <strong>Off-path beliefs convention:</strong> if a message is never sent under a candidate strategy, we set vendor beliefs to the prior for that message.
+          (This is a simple, explicit convention so "deviation payoffs" are well-defined.)
+        </div>
+
+        <div id="interpretationBox"></div>
+      </div>
+
+      <div class="card" style="margin-top:.9rem">
+        <h3>Game tables (for transparency)</h3>
+        <div class="muted">These are the computed acceptance decisions and payoffs used in the equilibrium check.</div>
+        <table>
+          <thead><tr><th>Type</th><th>Message</th><th>Offer x</th><th>Accept?</th><th>U_C(accept)</th><th>U_C(reject)</th><th>U_V(accept)</th><th>U_V(reject)</th></tr></thead>
+          <tbody id="payoffBody"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="highs_wasm.js"></script>
+<script>
+/**
+ * This HTML follows the same HiGHS WASM usage pattern as the attached example:
+ *   - createModule() -> Module
+ *   - new Module.HiGHSSolver()
+ *   - setupLP(...) with VectorDouble/Int
+ *   - solve() and getSolution()
+ * This is based on the user's provided reference file. fileciteturn0file0
+ */
+
+// ----------------------------- HiGHS init -----------------------------
+let Module = null;
+let highsInitPromise = null;
+
+function initHiGHS() {
+  if (Module) return Promise.resolve(true);
+  if (highsInitPromise) return highsInitPromise;
+  if (typeof createModule !== 'function') {
+    console.error('createModule not found');
+    return Promise.resolve(false);
+  }
+  highsInitPromise = createModule().then(m => {
+    Module = m;
+    const note = document.getElementById('solverNote');
+    note.innerHTML = '<span class="pill ok">HiGHS ready</span> <span class="muted">Solver loaded.</span>';
+    return true;
+  }).catch(err => {
+    console.error('HiGHS init failed:', err);
+    const note = document.getElementById('solverNote');
+    note.innerHTML = '<span class="pill bad">HiGHS failed</span> <span class="muted">Check highs_wasm.js / .wasm path and serve over http://</span>';
+    return false;
+  });
+  return highsInitPromise;
+}
+
+// ----------------------------- Game definition -----------------------------
+const TYPES = [
+  { id:'Lq', name:'LowGap,WeakEv',  gap:'L', q:'W' },
+  { id:'Ls', name:'LowGap,StrongEv',gap:'L', q:'S' },
+  { id:'Hq', name:'HighGap,WeakEv', gap:'H', q:'W' },
+  { id:'Hs', name:'HighGap,StrongEv',gap:'H', q:'S' }
+];
+const MESSAGES = [
+  { id:'K', label:'Cooperate', detMult:1.00, hV:5,  hC:5  },
+  { id:'G', label:'Guard',     detMult:0.75, hV:12, hC:10 },
+  { id:'F', label:'Fight',     detMult:0.45, hV:25, hC:18 }
+];
+// offers are demands x in k$
+const OFFERS = [50, 100, 150, 200];
+
+// Evidence base multiplier by q
+function evMult(q) { return (q === 'S') ? 0.95 : 0.55; } // how "provable" the gap is
+
+function readParams() {
+  const pG = parseFloat(document.getElementById('pG').value);
+  const pQ = parseFloat(document.getElementById('pQ').value);
+
+  const F_L = parseFloat(document.getElementById('F_L').value);
+  const F_H = parseFloat(document.getElementById('F_H').value);
+  const L_V = parseFloat(document.getElementById('L_V').value);
+  const L_C = parseFloat(document.getElementById('L_C').value);
+  const K_V = parseFloat(document.getElementById('K_V').value);
+  const K_C = parseFloat(document.getElementById('K_C').value);
+
+  return { pG, pQ, F_L, F_H, L_V, L_C, K_V, K_C };
+}
+
+function typePrior(type, pG, pQ) {
+  const pGap = (type.gap === 'H') ? pG : (1 - pG);
+  const pEv  = (type.q === 'S') ? pQ : (1 - pQ);
+  return pGap * pEv;
+}
+
+function F_of_gap(gap, F_L, F_H) {
+  return (gap === 'H') ? F_H : F_L;
+}
+
+// Payoffs given (θ,m,x). Reject means escalation.
+function payoffs(theta, msg, x, P) {
+  // detection probability = evMult(q) * detMult(m)
+  const d = evMult(theta.q) * msg.detMult;
+
+  const F = F_of_gap(theta.gap, P.F_L, P.F_H);
+
+  // Customer:
+  // accept: -x - disruption - postureCost
+  const UC_A = -x - P.K_C - msg.hC;
+
+  // reject: expected penalty - disruption - postureCost - escalationPain
+  const UC_R = -(d * F) - P.K_C - msg.hC - P.L_C;
+
+  // Vendor:
+  // accept: +x - auditCost - friction
+  const UV_A = x - P.K_V - msg.hV;
+
+  // reject: expected recovery - auditCost - friction - legal
+  const UV_R = (d * F) - P.K_V - msg.hV - P.L_V;
+
+  return { d, F, UC_A, UC_R, UV_A, UV_R };
+}
+
+function accepts(theta, msg, x, P) {
+  const { UC_A, UC_R } = payoffs(theta, msg, x, P);
+  return UC_A >= UC_R; // best response (ties accept)
+}
+
+// ----------------------------- Vendor best response via HiGHS (LP) -----------------------------
+// Given posterior mass over types for a message m: weights w_theta proportional to mu(theta|m).
+// Vendor chooses a mixed strategy over offers to maximize expected payoff, but optimum will be pure.
+// We solve: max Σ_o r_o * EV(o) s.t. Σ r_o = 1, 0<=r_o<=1
+async function vendorBestResponse(msg, muWeights, P) {
+  const ok = await initHiGHS();
+  if (!ok || !Module) {
+    // fallback: just argmax
+    let best = { offer: OFFERS[0], value: -1e18 };
+    for (const x of OFFERS) {
+      const v = expectedVendorPayoff(msg, x, muWeights, P);
+      if (v > best.value) best = { offer:x, value:v };
+    }
+    return { offerByLP: best.offer, lpValue: best.value, status: 'fallback' };
+  }
+
+  const m = Module;
+  const solver = new m.HiGHSSolver();
+  const n = OFFERS.length;
+  const INF = 1e20;
+
+  const vColCost = new m.VectorDouble();
+  const vColLower = new m.VectorDouble();
+  const vColUpper = new m.VectorDouble();
+  const vRowLower = new m.VectorDouble();
+  const vRowUpper = new m.VectorDouble();
+  const vAStart = new m.VectorInt();
+  const vAIndex = new m.VectorInt();
+  const vAValue = new m.VectorDouble();
+
+  // Objective: maximize EV => minimize -EV
+  for (let j=0;j<n;j++) {
+    const EV = expectedVendorPayoff(msg, OFFERS[j], muWeights, P);
+    vColCost.push_back(-EV);
+    vColLower.push_back(0.0);
+    vColUpper.push_back(1.0);
+  }
+
+  // Row: sum r_o = 1
+  vRowLower.push_back(1.0);
+  vRowUpper.push_back(1.0);
+
+  // CSC matrix with one row
+  for (let j=0;j<n;j++) {
+    vAStart.push_back(j);
+    vAIndex.push_back(0);
+    vAValue.push_back(1.0);
+  }
+  vAStart.push_back(n);
+
+  solver.setupLP(n, 1, vColCost, vColLower, vColUpper, vRowLower, vRowUpper, vAStart, vAIndex, vAValue);
+
+  const status = solver.solve();
+  const objValue = solver.getObjectiveValue();
+  const sol = solver.getSolution();
+
+  // Pick offer with max r (ties -> higher EV)
+  let bestJ = 0;
+  let bestR = -1;
+  for (let j=0;j<n;j++) {
+    const r = sol.get(j);
+    if (r > bestR + 1e-9) { bestR = r; bestJ = j; }
+  }
+
+  const chosen = OFFERS[bestJ];
+  const lpValue = -objValue;
+
+  solver.delete();
+  vColCost.delete(); vColLower.delete(); vColUpper.delete();
+  vRowLower.delete(); vRowUpper.delete();
+  vAStart.delete(); vAIndex.delete(); vAValue.delete();
+
+  return { offerByLP: chosen, lpValue, status: String(status) };
+}
+
+function expectedVendorPayoff(msg, x, muWeights, P) {
+  // muWeights: array of {theta, weight} with weights summing to 1 (or close)
+  let EV = 0;
+  for (const {theta, w} of muWeights) {
+    const p = payoffs(theta, msg, x, P);
+    const acc = (p.UC_A >= p.UC_R);
+    const v = acc ? p.UV_A : p.UV_R;
+    EV += w * v;
+  }
+  return EV;
+}
+
+function expectedCustomerPayoff(theta, msg, vendorOffer, P) {
+  const p = payoffs(theta, msg, vendorOffer, P);
+  const acc = (p.UC_A >= p.UC_R);
+  return acc ? p.UC_A : p.UC_R;
+}
+
+// ----------------------------- PBE search over pure customer signaling -----------------------------
+// Customer pure strategy: mapping each of 4 types -> one of {K,G,F}. 3^4 = 81.
+function allCustomerPureStrategies() {
+  const msgs = MESSAGES.map(m => m.id);
+  const out = [];
+  for (const m0 of msgs)
+    for (const m1 of msgs)
+      for (const m2 of msgs)
+        for (const m3 of msgs) {
+          out.push([m0,m1,m2,m3]); // aligned with TYPES order
+        }
+  return out;
+}
+
+function posteriorForMessage(strategy, msgId, P) {
+  // Return normalized weights mu(theta|m). If message unused => prior (off-path convention).
+  const weights = [];
+  let mass = 0;
+  for (let i=0;i<TYPES.length;i++) {
+    const theta = TYPES[i];
+    const prior = typePrior(theta, P.pG, P.pQ);
+    const sent = strategy[i];
+    if (sent === msgId) { mass += prior; weights.push({theta, wRaw: prior}); }
+  }
+  if (mass < 1e-12) {
+    // off-path: use prior
+    let total = 0;
+    for (const theta of TYPES) total += typePrior(theta, P.pG, P.pQ);
+    return TYPES.map(theta => ({theta, w: typePrior(theta, P.pG, P.pQ) / total}));
+  }
+  return weights.map(x => ({theta:x.theta, w:x.wRaw/mass}));
+}
+
+function strategyPretty(strategy) {
+  const parts = [];
+  for (let i=0;i<TYPES.length;i++) parts.push(`${TYPES[i].id}→${strategy[i]}`);
+  return parts.join(', ');
+}
+
+function vendorBRPretty(vbr) {
+  return `K→${vbr.K}, G→${vbr.G}, F→${vbr.F}`;
+}
+
+function posteriorsPretty(post) {
+  // post: {K:[...],G:[...],F:[...]}
+  const fmt = (arr) => arr.map(x => `${x.theta.id}:${x.w.toFixed(2)}`).join(' ');
+  return `μ(·|K) ${fmt(post.K)} | μ(·|G) ${fmt(post.G)} | μ(·|F) ${fmt(post.F)}`;
+}
+
+function generateInterpretation(equilibria, P) {
+  if (equilibria.length === 0) return '';
+  
+  // Analyze first equilibrium
+  const eq = equilibria[0];
+  const allCooperate = eq.strat.every(s => s === 'K');
+  const allGuard = eq.strat.every(s => s === 'G');
+  const allFight = eq.strat.every(s => s === 'F');
+  const mixed = !allCooperate && !allGuard && !allFight;
+  
+  let interpretation = '<div class="note" style="margin-top:.9rem;background:rgba(56,189,248,0.08);border-color:rgba(56,189,248,0.35)">';
+  interpretation += '<strong>💡 Interpreting the equilibrium:</strong> ';
+  
+  if (allCooperate) {
+    interpretation += `All customer types choose to <strong>Cooperate</strong> (K), revealing their true position upfront. `;
+    interpretation += `The vendor responds with the same offer ($${eq.vbr.K}k) regardless of beliefs, since all customers signal identically. `;
+    interpretation += `This pooling equilibrium occurs because the escalation costs (vendor legal: $${P.L_V}k, customer pain: $${P.L_C}k) are high enough to make fighting unprofitable for all types. `;
+    interpretation += '<strong>Key insight:</strong> When legal friction is expensive for both sides, transparent cooperation dominates strategic posturing.';
+  } else if (allGuard) {
+    interpretation += `All customer types choose to <strong>Guard</strong> (G), adopting a defensive but not combative posture. `;
+    interpretation += `The vendor offers $${eq.vbr.G}k to all. This pooling equilibrium balances information control with cooperation costs. `;
+    interpretation += '<strong>Key insight:</strong> Moderate resistance can be optimal when escalation is costly but full cooperation feels risky.';
+  } else if (allFight) {
+    interpretation += `All customer types choose to <strong>Fight</strong> (F), maximizing obstruction. `;
+    interpretation += `Despite high friction costs ($${MESSAGES[2].hV}k vendor, $${MESSAGES[2].hC}k customer), fighting pools all types together. `;
+    interpretation += `The vendor offers $${eq.vbr.F}k. <strong>Key insight:</strong> When penalties are severe, maximal resistance becomes rational even with high costs.`;
+  } else {
+    interpretation += `Customer types separate: `;
+    const signals = {K: [], G: [], F: []};
+    eq.strat.forEach((sig, idx) => signals[sig].push(TYPES[idx].id));
+    Object.keys(signals).forEach(sig => {
+      if (signals[sig].length > 0) interpretation += `${signals[sig].join(',')}→${sig}; `;
+    });
+    interpretation += `This separating equilibrium reveals private information through signaling. `;
+    interpretation += `Vendor offers: K=$${eq.vbr.K}k, G=$${eq.vbr.G}k, F=$${eq.vbr.F}k. `;
+    interpretation += '<strong>Key insight:</strong> When types can credibly separate, equilibrium allows price discrimination.';
+  }
+  
+  interpretation += '</div>';
+  return interpretation;
+}
+
+async function runSearch() {
+  const P = readParams();
+
+  // Update UI labels
+  document.getElementById('pGv').textContent = P.pG.toFixed(2);
+  document.getElementById('pQv').textContent = P.pQ.toFixed(2);
+  for (const id of ['F_L','F_H','L_V','L_C','K_V','K_C']) document.getElementById(id+'v').textContent = String(P[id]);
+
+  // Clear tables and interpretation
+  document.getElementById('eqBody').innerHTML = '';
+  document.getElementById('payoffBody').innerHTML = '';
+  document.getElementById('interpretationBox').innerHTML = '';
+  document.getElementById('summary').textContent = 'Computing…';
+
+  // Fill payoff table (deterministic acceptance)
+  for (const theta of TYPES) {
+    for (const msg of MESSAGES) {
+      for (const x of OFFERS) {
+        const p = payoffs(theta, msg, x, P);
+        const acc = (p.UC_A >= p.UC_R);
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td class="mono">${theta.id}</td>
+          <td>${msg.id} <span class="muted">(${msg.label})</span></td>
+          <td class="mono">${x}</td>
+          <td>${acc ? '<span class="pill ok">YES</span>' : '<span class="pill bad">NO</span>'}</td>
+          <td class="mono">${p.UC_A.toFixed(1)}</td>
+          <td class="mono">${p.UC_R.toFixed(1)}</td>
+          <td class="mono">${p.UV_A.toFixed(1)}</td>
+          <td class="mono">${p.UV_R.toFixed(1)}</td>`;
+        document.getElementById('payoffBody').appendChild(tr);
+      }
+    }
+  }
+
+  const strategies = allCustomerPureStrategies();
+  const equilibria = [];
+
+  // Pre-resolve HiGHS so results are fast
+  await initHiGHS();
+
+  for (const strat of strategies) {
+    // compute posteriors for each message
+    const post = {
+      K: posteriorForMessage(strat,'K',P),
+      G: posteriorForMessage(strat,'G',P),
+      F: posteriorForMessage(strat,'F',P)
+    };
+
+    // vendor best response for each message
+    const msgObj = { K: MESSAGES[0], G: MESSAGES[1], F: MESSAGES[2] };
+    const brK = await vendorBestResponse(msgObj.K, post.K, P);
+    const brG = await vendorBestResponse(msgObj.G, post.G, P);
+    const brF = await vendorBestResponse(msgObj.F, post.F, P);
+    const vbr = { K: brK.offerByLP, G: brG.offerByLP, F: brF.offerByLP };
+
+    // sequential rationality check for customer (given vbr)
+    let ok = true;
+    for (let i=0;i<TYPES.length;i++) {
+      const theta = TYPES[i];
+      const chosenMsg = strat[i];
+      const chosenOffer = vbr[chosenMsg];
+      const uChosen = expectedCustomerPayoff(theta, msgObj[chosenMsg], chosenOffer, P);
+
+      // deviation to other messages (with vendor BR under our belief convention)
+      for (const alt of ['K','G','F']) {
+        if (alt === chosenMsg) continue;
+        const uAlt = expectedCustomerPayoff(theta, msgObj[alt], vbr[alt], P);
+        if (uAlt > uChosen + 1e-6) { ok = false; break; }
+      }
+      if (!ok) break;
+    }
+
+    if (ok) {
+      equilibria.push({ strat, vbr, post });
+    }
+  }
+
+  // Render
+  const body = document.getElementById('eqBody');
+  if (equilibria.length === 0) {
+    document.getElementById('summary').innerHTML =
+      `<span class="pill bad">No equilibria</span> <span class="muted">Try adjusting penalties or escalation costs.</span>`;
+  } else {
+    document.getElementById('summary').innerHTML =
+      `<span class="pill ok">${equilibria.length} equilibrium(s)</span> <span class="muted">Pure customer signaling strategies (3^4=81) checked; vendor BR computed by HiGHS.</span>`;
+    
+    // Add interpretation
+    document.getElementById('interpretationBox').innerHTML = generateInterpretation(equilibria, P);
+  }
+
+  for (const eq of equilibria.slice(0, 10)) { // cap
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="mono">${strategyPretty(eq.strat)}</td>
+      <td class="mono">${vendorBRPretty(eq.vbr)}</td>
+      <td class="mono">${posteriorsPretty(eq.post)}</td>
+      <td>${'<span class="pill ok">PBE ✓</span>'}</td>`;
+    body.appendChild(tr);
+  }
+  if (equilibria.length > 10) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td colspan="4" class="muted">Showing first 10 equilibria.</td>`;
+    body.appendChild(tr);
+  }
+}
+
+// ----------------------------- UI wiring -----------------------------
+function syncLabels() {
+  const ids = ['pG','pQ','F_L','F_H','L_V','L_C','K_V','K_C'];
+  for (const id of ids) {
+    const el = document.getElementById(id);
+    const out = document.getElementById(id+'v');
+    if (out) out.textContent = (id==='pG' || id==='pQ') ? parseFloat(el.value).toFixed(2) : el.value;
+  }
+}
+
+function resetDefaults() {
+  document.getElementById('pG').value = 0.35;
+  document.getElementById('pQ').value = 0.55;
+  document.getElementById('F_L').value = 60;
+  document.getElementById('F_H').value = 220;
+  document.getElementById('L_V').value = 40;
+  document.getElementById('L_C').value = 90;
+  document.getElementById('K_V').value = 20;
+  document.getElementById('K_C').value = 15;
+  syncLabels();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  // show signal constants
+  document.getElementById('dK').textContent = MESSAGES[0].detMult.toFixed(2);
+  document.getElementById('dG').textContent = MESSAGES[1].detMult.toFixed(2);
+  document.getElementById('dF').textContent = MESSAGES[2].detMult.toFixed(2);
+  document.getElementById('hVK').textContent = MESSAGES[0].hV;
+  document.getElementById('hVG').textContent = MESSAGES[1].hV;
+  document.getElementById('hVF').textContent = MESSAGES[2].hV;
+  document.getElementById('hCK').textContent = MESSAGES[0].hC;
+  document.getElementById('hCG').textContent = MESSAGES[1].hC;
+  document.getElementById('hCF').textContent = MESSAGES[2].hC;
+
+  syncLabels();
+  document.querySelectorAll('input[type="range"]').forEach(r => r.addEventListener('input', syncLabels));
+  document.getElementById('runBtn').addEventListener('click', runSearch);
+  document.getElementById('resetBtn').addEventListener('click', () => {
+    resetDefaults();
+    document.getElementById('eqBody').innerHTML = '';
+    document.getElementById('payoffBody').innerHTML = '';
+    document.getElementById('interpretationBox').innerHTML = '';
+    document.getElementById('summary').textContent = 'Defaults restored. Click "Run PBE search".';
+  });
+});
+</script>
+</body>
+</html>
